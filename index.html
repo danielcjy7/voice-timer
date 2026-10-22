@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#5fb6e6">
+<title>음성 타이머</title>
+<style>
+  :root {
+    --frame: #5fb6e6;
+    --frame-edge: #ffffff;
+    --lcd: #b7bcb4;
+    --lcd-ink: #1d211e;
+    --lcd-dim: #4a504b;
+    --page: #e8eef2;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--page);
+    font-family: system-ui, "Noto Sans KR", "Malgun Gothic", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+    user-select: none; -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+
+  .device {
+    width: min(100%, 520px, 68dvh);
+    background: var(--frame);
+    border: 6px solid var(--frame-edge);
+    border-radius: 9%;
+    padding: 6% 6% 5%;
+    box-shadow: 0 10px 30px rgba(0,0,0,.18);
+    /* Fixed units: a % gap resolves to 0 in a column whose height is auto */
+    display: flex; flex-direction: column; gap: clamp(18px, 5vmin, 32px);
+  }
+  .brand {
+    text-align: center; color: #fff; font-weight: 700;
+    letter-spacing: .08em; font-size: clamp(14px, 4vmin, 22px);
+    margin-bottom: clamp(2px, 1vmin, 8px);
+  }
+
+  .lcd {
+    position: relative;
+    background: var(--lcd);
+    border: 3px solid #2a2f2c;
+    border-radius: 6px;
+    aspect-ratio: 1 / 1;
+    color: var(--lcd-ink);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 4%;
+  }
+  .clock {
+    width: 100%; display: flex; justify-content: space-between; align-items: baseline;
+    font-weight: 700; color: var(--lcd-dim);
+    font-size: clamp(18px, 6vmin, 34px);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dial {
+    flex: 1; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .circle {
+    appearance: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
+    width: 82%; aspect-ratio: 1 / 1; border-radius: 50%;
+    background: transparent;
+    box-shadow: inset 0 0 0 clamp(5px, 1.6vmin, 9px) var(--lcd-ink);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .circle:active { background: rgba(0,0,0,.06); }
+  .num {
+    font-weight: 800; line-height: 1;
+    font-size: clamp(80px, 30vmin, 190px);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em;
+  }
+  .num.word { font-size: clamp(56px, 18vmin, 120px); }
+  .unit { font-size: .3em; font-weight: 700; margin-left: .05em; }
+  .hint {
+    margin-top: 4%;
+    font-weight: 700; color: var(--lcd-dim);
+    font-size: clamp(16px, 5vmin, 28px);
+  }
+
+  .buttons { display: flex; justify-content: space-between; align-items: center; padding: 0 2%; }
+  .btn {
+    appearance: none; font: inherit; cursor: pointer;
+    width: 26%; aspect-ratio: 1 / 1; border-radius: 50%;
+    background: rgba(255,255,255,.12);
+    border: 3px solid rgba(255,255,255,.9);
+    color: #fff; font-weight: 700;
+    font-size: clamp(22px, 8vmin, 44px);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn.clear { width: 32%; font-size: clamp(16px, 5.5vmin, 30px); }
+  .btn:active { background: rgba(255,255,255,.35); }
+  .btn:disabled { opacity: .35; cursor: default; }
+
+  .warn {
+    position: fixed; left: 16px; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
+    background: #fff3cd; color: #5c4400; border: 2px solid #e0b100; border-radius: 12px;
+    padding: 14px 16px; font-size: 20px; font-weight: 700; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="warn" id="warn" hidden>이 화면에서는 소리가 나지 않아요.<br>Chrome(크롬)으로 열어 주세요.</div>
+
+<main class="device">
+  <div class="brand">음성 타이머</div>
+
+  <section class="lcd">
+    <div class="clock"><span id="ampm"></span><span id="time"></span></div>
+    <div class="dial">
+      <button class="circle" id="circle" aria-label="시작 또는 멈춤">
+        <span class="num" id="num">0</span>
+        <span class="hint" id="hint"></span>
+      </button>
+    </div>
+  </section>
+
+  <div class="buttons">
+    <button class="btn" id="add10" aria-label="10초 추가">10</button>
+    <button class="btn clear" id="clear" aria-label="0초로 지우기">CLEAR</button>
+    <button class="btn" id="add1" aria-label="1초 추가">1</button>
+  </div>
+</main>
+
+<script>
+(() => {
+  const MAX = 99;
+  const STORE_KEY = 'voiceTimer.seconds';
+  const SPEECH_RATE = 1.6; // 1 = normal; must fit "이십구" inside one second
+
+  const $ = id => document.getElementById(id);
+  const numEl = $('num'), hintEl = $('hint'), circle = $('circle');
+  const btns = [$('add10'), $('clear'), $('add1')];
+
+  // ---------- state ----------
+  let seconds = loadSeconds();
+  let running = false;
+  let timer = null;
+  let wakeLock = null;
+
+  function loadSeconds() {
+    try {
+      const v = parseInt(localStorage.getItem(STORE_KEY), 10);
+      return Number.isFinite(v) ? Math.min(MAX, Math.max(0, v)) : 30;
+    } catch { return 30; }
+  }
+  function saveSeconds() {
+    try { localStorage.setItem(STORE_KEY, String(seconds)); } catch {}
+  }
+
+  // ---------- speech ----------
+  const synth = window.speechSynthesis;
+  let koVoice = null;
+  function pickVoice() {
+    if (!synth) return;
+    const voices = synth.getVoices();
+    koVoice = voices.find(v => /^ko[-_]KR/i.test(v.lang) && v.localService)
+           || voices.find(v => /^ko/i.test(v.lang)) || null;
+  }
+  if (synth) {
+    pickVoice();
+    synth.addEventListener?.('voiceschanged', pickVoice);
+  } else {
+    $('warn').hidden = false;
+  }
+
+  function speak(text) {
+    if (!synth) return;
+    // Always drop whatever is still queued so the voice never falls behind the clock.
+    // (Some Android engines misreport `speaking`, so don't gate on it.)
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR';
+    if (koVoice) u.voice = koVoice;
+    u.rate = SPEECH_RATE;
+    synth.speak(u);
+  }
+
+  // ---------- chime (Web Audio, no files needed) ----------
+  let audioCtx = null;
+  function unlockAudio() {
+    // Must be created/resumed inside a tap or Android Chrome keeps it muted
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch { audioCtx = null; }
+  }
+  function chime() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    // 도-미-솔-높은 도, rising "다 됐어요" jingle
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+      const t = now + i * 0.16;
+      const last = i === 3;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + (last ? 1.2 : 0.45));
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + (last ? 1.25 : 0.5));
+    });
+  }
+
+  // 1..99 → Sino-Korean reading (29 → 이십구)
+  const DIGITS = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+  function korean(n) {
+    const t = Math.floor(n / 10), o = n % 10;
+    return (t === 0 ? '' : t === 1 ? '십' : DIGITS[t] + '십') + DIGITS[o];
+  }
+
+  // ---------- screen ----------
+  function show(text, hint) {
+    const isWord = !/^\d+$/.test(text);
+    numEl.classList.toggle('word', isWord);
+    numEl.textContent = text;
+    hintEl.textContent = hint;
+  }
+  function showIdle() {
+    show(String(seconds), seconds > 0 ? '눌러서 시작' : '시간을 맞춰 주세요');
+  }
+  function setButtonsEnabled(on) {
+    btns.forEach(b => { b.disabled = !on; });
+  }
+
+  // ---------- run sequence ----------
+  // Prep (~5s): 준비하세요 … 삼, 이, 일, 시작 → countdown N..1 → 끝
+  function buildSteps(n) {
+    const steps = [
+      { t: 0,    say: '준비하세요', show: '준비' },
+      { t: 2000, say: '삼', show: '3' },
+      { t: 3000, say: '이', show: '2' },
+      { t: 4000, say: '일', show: '1' },
+      { t: 5000, say: '시작', show: '시작' },
+    ];
+    const base = 6000;
+    for (let k = 0; k < n; k++) {
+      steps.push({ t: base + k * 1000, say: korean(n - k), show: String(n - k) });
+    }
+    steps.push({ t: base + n * 1000, say: '끝', show: '끝' });
+    steps.push({ t: base + n * 1000 + 700, chime: true, show: '끝' });
+    steps.push({ t: base + n * 1000 + 3000, done: true });
+    return steps;
+  }
+
+  function start() {
+    if (running || seconds === 0) return;
+    running = true;
+    unlockAudio();
+    setButtonsEnabled(false);
+    requestWakeLock();
+
+    const steps = buildSteps(seconds);
+    const startAt = performance.now();
+    let i = 0;
+
+    const tick = () => {
+      // Schedule against the start time so delays don't accumulate
+      const step = steps[i++];
+      if (step.done) { stop(); return; }
+      if (step.say) speak(step.say);
+      if (step.chime) chime();
+      show(step.show, '눌러서 멈춤');
+      if (i < steps.length) {
+        const delay = steps[i].t - (performance.now() - startAt);
+        timer = setTimeout(tick, Math.max(0, delay));
+      }
+    };
+    tick(); // first utterance runs inside the tap, which Android Chrome requires
+  }
+
+  function stop() {
+    clearTimeout(timer);
+    timer = null;
+    if (synth && (synth.speaking || synth.pending)) synth.cancel();
+    running = false;
+    setButtonsEnabled(true);
+    releaseWakeLock();
+    showIdle();
+  }
+
+  // ---------- wake lock ----------
+  async function requestWakeLock() {
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+  }
+  function releaseWakeLock() {
+    try { wakeLock?.release(); } catch {}
+    wakeLock = null;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && running) requestWakeLock();
+  });
+
+  // ---------- inputs ----------
+  function buzz() { try { navigator.vibrate?.(25); } catch {} }
+
+  function add(n) {
+    if (running) return;
+    seconds = Math.min(MAX, seconds + n);
+    saveSeconds(); showIdle(); buzz();
+  }
+  $('add10').addEventListener('click', () => add(10));
+  $('add1').addEventListener('click', () => add(1));
+  $('clear').addEventListener('click', () => {
+    if (running) return;
+    seconds = 0; saveSeconds(); showIdle(); buzz();
+  });
+  circle.addEventListener('click', () => {
+    buzz();
+    running ? stop() : start();
+  });
+
+  // ---------- clock ----------
+  function updateClock() {
+    const d = new Date();
+    const h = d.getHours();
+    $('ampm').textContent = h < 12 ? '오전' : '오후';
+    $('time').textContent = `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  showIdle();
+})();
+</script>
+</body>
+</html>
