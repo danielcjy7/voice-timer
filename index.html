@@ -104,11 +104,34 @@
     background: #fff3cd; color: #5c4400; border: 2px solid #e0b100; border-radius: 12px;
     padding: 14px 16px; font-size: 20px; font-weight: 700; text-align: center;
   }
+
+  /* Full-screen notice shown inside KakaoTalk's in-app browser (no TTS there) */
+  .inapp {
+    position: fixed; inset: 0; z-index: 10;
+    background: var(--frame);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px;
+    padding: 24px; text-align: center; color: #fff;
+  }
+  .inapp[hidden] { display: none; }
+  .inapp p { margin: 0; font-size: clamp(26px, 8vw, 40px); font-weight: 800; line-height: 1.4; }
+  .inapp-btn {
+    appearance: none; font: inherit; cursor: pointer;
+    width: min(100%, 360px); padding: 24px 16px; border-radius: 20px;
+    background: #fff; color: #1d5f86; border: 0;
+    font-size: clamp(28px, 9vw, 44px); font-weight: 800;
+    box-shadow: 0 6px 18px rgba(0,0,0,.2);
+  }
+  .inapp-btn:active { transform: scale(.98); }
 </style>
 </head>
 <body>
 
 <div class="warn" id="warn" hidden>이 화면에서는 소리가 나지 않아요.<br>Chrome(크롬)으로 열어 주세요.</div>
+
+<div class="inapp" id="inapp" hidden>
+  <p>카카오톡 안에서는<br>소리가 나지 않아요.</p>
+  <button class="inapp-btn" id="openChrome">크롬으로 열기</button>
+</div>
 
 <main class="device">
   <div class="brand">음성 타이머</div>
@@ -137,6 +160,24 @@
   const SPEECH_RATE = 1.6; // 1 = normal; must fit "이십구" inside one second
 
   const $ = id => document.getElementById(id);
+
+  // ---------- KakaoTalk in-app browser → hand off to a real browser ----------
+  // Kakao's built-in browser has no speech, so try to jump out automatically,
+  // and keep a big button on screen in case the jump is blocked.
+  if (/KAKAOTALK/i.test(navigator.userAgent)) {
+    const here = location.href;
+    const kakaoExternal = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(here);
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const chromeIntent = 'intent://' + here.replace(/^https?:\/\//, '') +
+      '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' +
+      encodeURIComponent(here) + ';end';
+
+    $('inapp').hidden = false;
+    $('openChrome').addEventListener('click', () => {
+      location.href = isAndroid ? chromeIntent : kakaoExternal;
+    });
+    location.href = kakaoExternal;
+  }
   const numEl = $('num'), hintEl = $('hint'), circle = $('circle');
   const btns = [$('add10'), $('clear'), $('add1')];
 
