@@ -37,8 +37,14 @@
   }
   .brand {
     text-align: center; color: #fff; font-weight: 700;
-    letter-spacing: .08em; font-size: clamp(14px, 4vmin, 22px);
+    letter-spacing: .08em; font-size: clamp(18px, 5.5vmin, 30px);
     margin-bottom: clamp(2px, 1vmin, 8px);
+  }
+  /* Version from REQUIREMENTS.md §7 — bump on every change */
+  .ver {
+    display: block; margin-top: 2px;
+    font-size: clamp(10px, 2.6vmin, 13px); font-weight: 500;
+    letter-spacing: .04em; opacity: .75;
   }
 
   /* Square LCD: clock pinned top, circle dead centre, hint in the band below it */
@@ -134,7 +140,7 @@
 </div>
 
 <main class="device">
-  <div class="brand">음성 타이머</div>
+  <div class="brand">음성 타이머<span class="ver">v1.10</span></div>
 
   <section class="lcd">
     <div class="clock"><span id="ampm"></span><span id="time"></span></div>
