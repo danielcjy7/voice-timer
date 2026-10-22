@@ -41,6 +41,7 @@
     margin-bottom: clamp(2px, 1vmin, 8px);
   }
 
+  /* Square LCD: clock pinned top, circle dead centre, hint in the band below it */
   .lcd {
     position: relative;
     background: var(--lcd);
@@ -48,23 +49,19 @@
     border-radius: 6px;
     aspect-ratio: 1 / 1;
     color: var(--lcd-ink);
-    display: flex; flex-direction: column; align-items: center;
-    padding: 4%;
   }
   .clock {
-    width: 100%; display: flex; justify-content: space-between; align-items: baseline;
+    position: absolute; top: 4%; left: 5%; right: 5%;
+    display: flex; justify-content: space-between; align-items: baseline;
     font-weight: 700; color: var(--lcd-dim);
     font-size: clamp(18px, 6vmin, 34px);
     font-variant-numeric: tabular-nums;
   }
 
-  .dial {
-    flex: 1; width: 100%;
-    display: flex; align-items: center; justify-content: center;
-  }
   .circle {
     appearance: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
-    width: 82%; aspect-ratio: 1 / 1; border-radius: 50%;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 70%; aspect-ratio: 1 / 1; border-radius: 50%;
     background: transparent;
     box-shadow: inset 0 0 0 clamp(5px, 1.6vmin, 9px) var(--lcd-ink);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -73,16 +70,19 @@
   .circle:active { background: rgba(0,0,0,.06); }
   .num {
     font-weight: 800; line-height: 1;
-    font-size: clamp(80px, 30vmin, 190px);
+    font-size: clamp(76px, 30vmin, 185px);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -.02em;
+    /* Trim the font's ascender/descender space so the digits themselves sit at the circle's centre */
+    text-box: trim-both cap alphabetic;
   }
-  .num.word { font-size: clamp(56px, 18vmin, 120px); }
+  .num.word { font-size: clamp(48px, 16vmin, 110px); }
   .unit { font-size: .3em; font-weight: 700; margin-left: .05em; }
   .hint {
-    margin-top: 4%;
-    font-weight: 700; color: var(--lcd-dim);
-    font-size: clamp(16px, 5vmin, 28px);
+    position: absolute; left: 0; right: 0; bottom: 3%;
+    text-align: center; white-space: nowrap; line-height: 1.2;
+    font-weight: 800; color: var(--lcd-dim);
+    font-size: clamp(18px, 6vmin, 32px);
+    cursor: pointer;
   }
 
   .buttons { display: flex; justify-content: space-between; align-items: center; padding: 0 2%; }
@@ -138,12 +138,10 @@
 
   <section class="lcd">
     <div class="clock"><span id="ampm"></span><span id="time"></span></div>
-    <div class="dial">
-      <button class="circle" id="circle" aria-label="시작 또는 멈춤">
-        <span class="num" id="num">0</span>
-        <span class="hint" id="hint"></span>
-      </button>
-    </div>
+    <button class="circle" id="circle" aria-label="시작 또는 멈춤">
+      <span class="num" id="num">0</span>
+    </button>
+    <div class="hint" id="hint"></div>
   </section>
 
   <div class="buttons">
@@ -183,7 +181,8 @@
 
   // ---------- state ----------
   let seconds = loadSeconds();
-  let running = false;
+  let running = false;   // true from the first tap until the run ends (paused included)
+  let paused = false;
   let timer = null;
   let wakeLock = null;
 
@@ -289,43 +288,68 @@
     for (let k = 0; k < n; k++) {
       steps.push({ t: base + k * 1000, say: korean(n - k), show: String(n - k) });
     }
-    steps.push({ t: base + n * 1000, say: '끝', show: '끝' });
-    steps.push({ t: base + n * 1000 + 700, chime: true, show: '끝' });
+    steps.push({ t: base + n * 1000, say: '끝', show: '끝', end: true });
+    steps.push({ t: base + n * 1000 + 700, chime: true, show: '끝', end: true });
     steps.push({ t: base + n * 1000 + 3000, done: true });
     return steps;
   }
 
+  let steps = [], i = 0, startAt = 0, ended = false;
+
+  // Schedule against startAt so delays don't accumulate
+  function schedule() {
+    if (i >= steps.length) return;
+    const delay = steps[i].t - (performance.now() - startAt);
+    timer = setTimeout(tick, Math.max(0, delay));
+  }
+  function tick() {
+    const step = steps[i++];
+    if (step.done) { stop(); return; }
+    if (step.end) ended = true;
+    if (step.say) speak(step.say);
+    if (step.chime) chime();
+    show(step.show, ended ? '' : '눌러서 멈춤');
+    schedule();
+  }
+
   function start() {
     if (running || seconds === 0) return;
-    running = true;
+    running = true; paused = false; ended = false;
     unlockAudio();
     setButtonsEnabled(false);
     requestWakeLock();
-
-    const steps = buildSteps(seconds);
-    const startAt = performance.now();
-    let i = 0;
-
-    const tick = () => {
-      // Schedule against the start time so delays don't accumulate
-      const step = steps[i++];
-      if (step.done) { stop(); return; }
-      if (step.say) speak(step.say);
-      if (step.chime) chime();
-      show(step.show, '눌러서 멈춤');
-      if (i < steps.length) {
-        const delay = steps[i].t - (performance.now() - startAt);
-        timer = setTimeout(tick, Math.max(0, delay));
-      }
-    };
+    steps = buildSteps(seconds);
+    i = 0;
+    startAt = performance.now();
     tick(); // first utterance runs inside the tap, which Android Chrome requires
+  }
+
+  // Freeze on the current number; only CLEAR (back to the set time) stays active
+  function pause() {
+    clearTimeout(timer);
+    timer = null;
+    if (synth) synth.cancel();
+    paused = true;
+    hintEl.textContent = '눌러서 계속';
+    $('clear').disabled = false;
+  }
+
+  // Say "계속", then pick up with the next number one second later
+  function resume() {
+    paused = false;
+    unlockAudio();
+    $('clear').disabled = true;
+    hintEl.textContent = '눌러서 멈춤';
+    speak('계속');
+    startAt = performance.now() + 1000 - steps[i].t;
+    schedule();
   }
 
   function stop() {
     clearTimeout(timer);
     timer = null;
     if (synth && (synth.speaking || synth.pending)) synth.cancel();
-    running = false;
+    running = false; paused = false;
     setButtonsEnabled(true);
     releaseWakeLock();
     showIdle();
@@ -354,13 +378,19 @@
   $('add10').addEventListener('click', () => add(10));
   $('add1').addEventListener('click', () => add(1));
   $('clear').addEventListener('click', () => {
-    if (running) return;
-    seconds = 0; saveSeconds(); showIdle(); buzz();
-  });
-  circle.addEventListener('click', () => {
     buzz();
-    running ? stop() : start();
+    if (paused) { stop(); return; }   // paused: give up this run, back to the set time
+    if (running) return;
+    seconds = 0; saveSeconds(); showIdle();
   });
+  // The hint text sits under the circle; tapping it does the same thing
+  [circle, hintEl].forEach(el => el.addEventListener('click', () => {
+    buzz();
+    if (!running) start();
+    else if (paused) resume();
+    else if (ended) stop();   // during "끝" + chime, a tap just finishes
+    else pause();
+  }));
 
   // ---------- clock ----------
   function updateClock() {
